@@ -114,10 +114,35 @@ install_data('00_org.gnome.shell.gschema.override', install_dir: schemadir)
 if have_systemd
   unitconf = configuration_data()
   unitconf.set('bindir', bindir)
+  supported_sessions = ['wayland']
+  if have_x11
+    configure_file(
+      input: 'org.gnome.Shell@x11.service.in',
+      output: 'org.gnome.Shell@x11.service',
+      configuration: unitconf,
+      install_dir: systemduserunitdir
+    )
+    supported_sessions += ['x11']
+  endif
+
   configure_file(
-    input: 'org.gnome.Shell@.service.in',
-    output: 'org.gnome.Shell@.service',
+    input: 'org.gnome.Shell@wayland.service.in',
+    output: 'org.gnome.Shell@wayland.service',
     configuration: unitconf,
+    install_dir: systemduserunitdir
+  )
+
+  units = files('org.gnome.Shell-disable-extensions.service')
+  targetconf = configuration_data()
+  sessions_wants = []
+  foreach session: supported_sessions
+    sessions_wants += 'org.gnome.Shell@' + session + '.service'
+  endforeach
+  targetconf.set('SUPPORTED_SESSIONS', ' '.join(sessions_wants))
+  target = configure_file(
+    input: 'org.gnome.Shell.target.in',
+    output: 'org.gnome.Shell.target',
+    configuration: targetconf,
     install_dir: systemduserunitdir
   )
 

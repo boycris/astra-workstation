@@ -45,6 +45,11 @@ class RunDialog extends ModalDialog.ModalDialog {
         this._internalCommands = {
             'lg': () => Main.createLookingGlass().open(),
 
+            'r': this._restart.bind(this),
+
+            // Developer brain backwards compatibility
+            'restart': this._restart.bind(this),
+
             'debugexit': () => global.context.terminate(),
 
             // rt is short for "reload theme"
@@ -255,6 +260,16 @@ class RunDialog extends ModalDialog.ModalDialog {
     _showError(message) {
         this._commandError = true;
         this._descriptionLabel.set_text(message);
+    }
+
+    _restart() {
+        if (Meta.is_wayland_compositor()) {
+            this._showError(_('Restart is not available on Wayland'));
+            return;
+        }
+        this._shouldFadeOut = false;
+        this.close();
+        Meta.restart(_('Restarting…'), global.context);
     }
 
 

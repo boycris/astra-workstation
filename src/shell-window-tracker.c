@@ -10,7 +10,7 @@
 #include <meta/window.h>
 #include <meta/meta-workspace-manager.h>
 #include <meta/meta-startup-notification.h>
-#ifdef HAVE_XWAYLAND
+#ifdef HAVE_X11_CLIENT
 #include <meta/meta-x11-group.h>
 #endif
 
@@ -302,7 +302,7 @@ static ShellApp*
 get_app_from_window_group (ShellWindowTracker  *tracker,
                            MetaWindow          *window)
 {
-#ifdef HAVE_XWAYLAND
+#ifdef HAVE_X11_CLIENT
   ShellApp *result;
   GSList *group_windows;
   MetaGroup *group;

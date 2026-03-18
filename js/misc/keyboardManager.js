@@ -2,6 +2,7 @@ import GLib from 'gi://GLib';
 import GnomeDesktop from 'gi://GnomeDesktop';
 import Meta from 'gi://Meta';
 
+import * as Main from '../ui/main.js';
 import * as Signals from './signals.js';
 
 export const DEFAULT_LOCALE = 'en_US';
@@ -28,6 +29,17 @@ export function getKeyboardManager() {
     if (_keyboardManager == null)
         _keyboardManager = new KeyboardManager();
     return _keyboardManager;
+}
+
+export function releaseKeyboard() {
+    if (Main.modalCount > 0)
+        global.backend.unfreeze_keyboard(global.get_current_time());
+    else
+        global.backend.ungrab_keyboard(global.get_current_time());
+}
+
+export function holdKeyboard() {
+    global.backend.freeze_keyboard(global.get_current_time());
 }
 
 class KeyboardManager extends Signals.EventEmitter {

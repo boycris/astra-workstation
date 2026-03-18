@@ -27,7 +27,7 @@
 #include <meta/meta-workspace-manager.h>
 #include <mtk/mtk.h>
 
-#ifdef HAVE_XWAYLAND
+#ifdef HAVE_X11
 #include <meta/meta-x11-display.h>
 #endif
 
@@ -963,7 +963,7 @@ ui_scaling_factor_changed (MetaSettings *settings,
   update_scaling_factor (global, settings);
 }
 
-#ifdef HAVE_XWAYLAND
+#ifdef HAVE_X11
 static void
 on_x11_display_closed (MetaDisplay *display,
                        ShellGlobal *global)
@@ -980,7 +980,7 @@ _shell_global_set_plugin (ShellGlobal *global,
   MetaDisplay *display;
   MetaBackend *backend;
   MetaSettings *settings;
-#ifdef HAVE_XWAYLAND
+#ifdef HAVE_X11
   MetaX11Display *x11_display;
 #endif
 
@@ -1034,7 +1034,7 @@ _shell_global_set_plugin (ShellGlobal *global,
                                "End of frame, possibly including swap time",
                                "");
 
-#ifdef HAVE_XWAYLAND
+#ifdef HAVE_X11
   x11_display = meta_display_get_x11_display (display);
   if (x11_display && meta_x11_display_get_xdisplay (x11_display))
     g_signal_connect_object (global->meta_display, "x11-display-closing",

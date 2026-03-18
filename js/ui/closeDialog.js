@@ -109,6 +109,32 @@ export const CloseDialog = GObject.registerClass({
         this.response(Meta.CloseDialogResponse.FORCE_CLOSE);
     }
 
+    _onFocusChanged() {
+        if (Meta.is_wayland_compositor())
+            return;
+
+        let focusWindow = global.display.focus_window;
+        let keyFocus = global.stage.key_focus;
+
+        let shouldTrack;
+        if (focusWindow != null)
+            shouldTrack = focusWindow === this._window;
+        else
+            shouldTrack = keyFocus && this._dialog.contains(keyFocus);
+
+        if (shouldTrack) {
+            if (!this._tracked) {
+                Main.layoutManager.trackChrome(this._dialog,
+                    {affectsInputRegion: true});
+            }
+            this._tracked = true;
+        } else {
+            if (this._tracked)
+                Main.layoutManager.untrackChrome(this._dialog);
+            this._tracked = false;
+        }
+    }
+
     vfunc_show() {
         if (this._dialog != null)
             return;
@@ -120,6 +146,12 @@ export const CloseDialog = GObject.registerClass({
                 this._window.check_alive(global.display.get_current_time_roundtrip());
                 return GLib.SOURCE_CONTINUE;
             });
+
+        global.display.connectObject(
+            'notify::focus-window', this._onFocusChanged.bind(this), this);
+
+        global.stage.connectObject(
+            'notify::key-focus', this._onFocusChanged.bind(this), this);
 
         this._addWindowEffect();
         this._initDialog();
@@ -136,6 +168,7 @@ export const CloseDialog = GObject.registerClass({
             scale_y: 1,
             mode: Clutter.AnimationMode.EASE_OUT_BACK,
             duration: DIALOG_TRANSITION_TIME,
+            onComplete: this._onFocusChanged.bind(this),
         });
     }
 

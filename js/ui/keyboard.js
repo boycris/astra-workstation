@@ -396,6 +396,16 @@ const Key = GObject.registerClass({
             return Clutter.EVENT_STOP;
         });
         button.connect('touch-event', (actor, event) => {
+            // Pointer events are handled in the key's `notify::hover`
+            // handler. They can't possibly reach here on Wayland, but
+            // for single-touch cases. Besides, the X11 passive touch grab
+            // set up by Mutter will make us see first the touch events
+            // and later the pointer events, so it will look like two
+            // unrelated series of events, we want to avoid double handling
+            // in these cases.
+            if (!Meta.is_wayland_compositor())
+                return Clutter.EVENT_PROPAGATE;
+
             const slot = event.get_event_sequence().get_slot();
 
             if (!this._touchPressSlot &&
@@ -1203,6 +1213,16 @@ export const Keyboard = GObject.registerClass({
         this._windowMovedId = this._focusTracker.connect('window-moved',
             this._onFocusWindowMoving.bind(this));
 
+        // Valid only for X11
+        if (!Meta.is_wayland_compositor()) {
+            this._focusTracker.connectObject('focus-changed', (_tracker, focused) => {
+                if (focused)
+                    this.open(Main.layoutManager.focusIndex);
+                else
+                    this.close();
+            }, this);
+        }
+
         this._showIdleId = 0;
 
         this._keyboardVisible = false;
@@ -1426,10 +1446,11 @@ export const Keyboard = GObject.registerClass({
                 return;
         }
 
-        const emojiVisible = purpose === Clutter.InputContentPurpose.NORMAL ||
-            purpose === Clutter.InputContentPurpose.ALPHA ||
-            purpose === Clutter.InputContentPurpose.PASSWORD ||
-            purpose === Clutter.InputContentPurpose.TERMINAL;
+        const emojiVisible = Meta.is_wayland_compositor() &&
+            (purpose === Clutter.InputContentPurpose.NORMAL ||
+             purpose === Clutter.InputContentPurpose.ALPHA ||
+             purpose === Clutter.InputContentPurpose.PASSWORD ||
+             purpose === Clutter.InputContentPurpose.TERMINAL);
 
         keyboardModel.getLevels().forEach(currentLevel => {
             const levelLayout = new KeyContainer();
@@ -1790,6 +1811,12 @@ export const Keyboard = GObject.registerClass({
         this._keyboardHeightNotifyId = keyboardBox.connect('notify::height', () => {
             this.translation_y = -this.height;
         });
+
+        // Toggle visibility so the keyboardBox can update its chrome region.
+        if (!Meta.is_wayland_compositor()) {
+            keyboardBox.hide();
+            keyboardBox.show();
+        }
     }
 
     _animateHide() {

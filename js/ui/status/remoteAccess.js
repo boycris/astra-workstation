@@ -168,6 +168,13 @@ export const ScreenSharingIndicator = GObject.registerClass({
     }
 
     _onNewHandle(handle) {
+        // We can't possibly know about all types of screen sharing on X11, so
+        // showing these controls on X11 might give a false sense of security.
+        // Thus, only enable these controls when using Wayland, where we are
+        // in control of sharing.
+        if (!Meta.is_wayland_compositor())
+            return;
+
         if (handle.isRecording)
             return;
 

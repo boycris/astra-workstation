@@ -99,7 +99,7 @@ class IBusManager extends Signals.EventEmitter {
     async _queueSpawn() {
         const isSystemdService = await this._ibusSystemdServiceExists();
         if (!isSystemdService)
-            this._spawn([]);
+            this._spawn(Meta.is_wayland_compositor() ? [] : ['--xim']);
     }
 
     _tryAppendEnv(env, varname) {

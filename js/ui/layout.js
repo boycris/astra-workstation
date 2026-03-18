@@ -1071,12 +1071,17 @@ export const LayoutManager = GObject.registerClass({
             delete this._updateRegionIdle;
         }
 
-        const struts = [];
+        let rects = [], struts = [], i;
         const isPopupMenuVisible = global.top_window_group.get_children().some(isPopupMetaWindow);
+        const wantsInputRegion =
+            !this._startingUp &&
+            !isPopupMenuVisible &&
+            Main.modalCount === 0 &&
+            !Meta.is_wayland_compositor();
 
-        for (let i = 0; i < this._trackedActors.length; i++) {
+        for (i = 0; i < this._trackedActors.length; i++) {
             const actorData = this._trackedActors[i];
-            if (!actorData.affectsStruts)
+            if (!(actorData.affectsInputRegion && wantsInputRegion) && !actorData.affectsStruts)
                 continue;
 
             let [x, y] = actorData.actor.get_transformed_position();
@@ -1085,6 +1090,9 @@ export const LayoutManager = GObject.registerClass({
             y = Math.round(y);
             w = Math.round(w);
             h = Math.round(h);
+
+            if (actorData.affectsInputRegion && wantsInputRegion && actorData.actor.get_paint_visibility())
+                rects.push(new Mtk.Rectangle({x, y, width: w, height: h}));
 
             let monitor = null;
             if (actorData.affectsStruts)
@@ -1140,6 +1148,9 @@ export const LayoutManager = GObject.registerClass({
             }
         }
 
+        if (wantsInputRegion)
+            global.set_stage_input_region(rects);
+
         this._isPopupWindowVisible = isPopupMenuVisible;
 
         const workspaceManager = global.workspace_manager;
@@ -1168,10 +1179,18 @@ class HotCorner extends Clutter.Actor {
     _init(layoutManager, monitor, x, y) {
         super._init();
 
+        // We use this flag to mark the case where the user has entered the
+        // hot corner and has not left both the hot corner and a surrounding
+        // guard area (the "environs"). This avoids triggering the hot corner
+        // multiple times due to an accidental jitter.
+        this._entered = false;
+
         this._monitor = monitor;
 
         this._x = x;
         this._y = y;
+
+        this._setupFallbackCornerIfNeeded(layoutManager);
 
         this._pressureBarrier = new PressureBarrier(
             HOT_CORNER_PRESSURE_THRESHOLD,
@@ -1235,6 +1254,45 @@ class HotCorner extends Clutter.Actor {
         }
     }
 
+    _setupFallbackCornerIfNeeded(layoutManager) {
+        const {capabilities} = global.backend;
+        if ((capabilities & Meta.BackendCapabilities.BARRIERS) === 0) {
+            this.set({
+                name: 'hot-corner-environs',
+                x: this._x,
+                y: this._y,
+                width: 3,
+                height: 3,
+                reactive: true,
+            });
+
+            this._corner = new Clutter.Actor({
+                name: 'hot-corner',
+                width: 1,
+                height: 1,
+                opacity: 0,
+                reactive: true,
+            });
+            this._corner._delegate = this;
+
+            this.add_child(this._corner);
+            layoutManager.addChrome(this);
+
+            if (Clutter.get_default_text_direction() === Clutter.TextDirection.RTL) {
+                this._corner.set_position(this.width - this._corner.width, 0);
+                this.set_pivot_point(1.0, 0.0);
+                this.translation_x = -this.width;
+            } else {
+                this._corner.set_position(0, 0);
+            }
+
+            this._corner.connect('enter-event',
+                this._onCornerEntered.bind(this));
+            this._corner.connect('leave-event',
+                this._onCornerLeft.bind(this));
+        }
+    }
+
     _onDestroy() {
         this.setBarrierSize(0);
         this._pressureBarrier.destroy();
@@ -1261,6 +1319,27 @@ class HotCorner extends Clutter.Actor {
         this._toggleOverview();
 
         return DND.DragMotionResult.CONTINUE;
+    }
+
+    _onCornerEntered() {
+        if (!this._entered) {
+            this._entered = true;
+            this._toggleOverview();
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    _onCornerLeft(actor, event) {
+        if (event.get_related() !== this)
+            this._entered = false;
+        // Consume event, otherwise this will confuse onEnvironsLeft
+        return Clutter.EVENT_STOP;
+    }
+
+    vfunc_leave_event(event) {
+        if (event.get_related() !== this._corner)
+            this._entered = false;
+        return Clutter.EVENT_PROPAGATE;
     }
 });
 

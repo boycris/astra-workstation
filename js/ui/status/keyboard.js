@@ -407,8 +407,10 @@ export class InputSourceManager extends Signals.EventEmitter {
 
     _modifiersSwitcher() {
         const sourceIndexes = Object.keys(this._inputSources);
-        if (sourceIndexes.length === 0)
-            return;
+        if (sourceIndexes.length === 0) {
+            KeyboardManager.releaseKeyboard();
+            return true;
+        }
 
         let is = this._currentSource;
         if (!is)
@@ -509,6 +511,16 @@ export class InputSourceManager extends Signals.EventEmitter {
     }
 
     activateInputSource(is, interactive) {
+        // The focus changes during holdKeyboard/releaseKeyboard may trick
+        // the client into hiding UI containing the currently focused entry.
+        // So holdKeyboard/releaseKeyboard are not called when
+        // 'set-content-type' signal is received.
+        // E.g. Focusing on a password entry in a popup in Xorg Firefox
+        // will emit 'set-content-type' signal.
+        // https://gitlab.gnome.org/GNOME/gnome-shell/issues/391
+        const holdKeyboard = !this._reloading;
+        if (holdKeyboard)
+            KeyboardManager.holdKeyboard();
         this._keyboardManager.apply(is.xkbId);
 
         let engine;
@@ -520,7 +532,10 @@ export class InputSourceManager extends Signals.EventEmitter {
             engine = `xkb:${name}:${variant}:${lang}`;
         }
 
-        this._ibusManager.setEngine(engine);
+        this._ibusManager.setEngine(engine).then(() => {
+            if (holdKeyboard)
+                KeyboardManager.releaseKeyboard();
+        });
 
         this._currentInputSourceChanged(is, interactive);
 
