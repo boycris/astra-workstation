@@ -36,6 +36,66 @@ const CLOUD_MODELS = {
   "Llama 3.1 405B": "llama-3.1-405b",
 };
 
+const NEBULA_VERTEX_SHADER = `
+  varying vec3 vWorldPosition;
+  varying vec3 vNormal;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vWorldPosition = worldPosition.xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const NEBULA_FRAGMENT_SHADER = `
+  uniform float uTime;
+  uniform vec3 uColor;
+  uniform float uIntensity;
+  varying vec3 vWorldPosition;
+  varying vec3 vNormal;
+
+  // Simple 3D Noise function for the nebula
+  float hash(float n) { return fract(sin(n) * 43758.5453123); }
+  float noise(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+    float n = p.x + p.y*57.0 + 113.0*p.z;
+    return mix(mix(mix(hash(n+0.0), hash(n+1.0), f.x),
+                   mix(hash(n+57.0), hash(n+58.0), f.x), f.y),
+               mix(mix(hash(n+113.0), hash(n+114.0), f.x),
+                   mix(hash(n+170.0), hash(n+171.0), f.x), f.y), f.z);
+  }
+
+  float fbm(vec3 p) {
+    float f = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 4; i++) {
+      f += amp * noise(p);
+      p *= 2.0;
+      amp *= 0.5;
+    }
+    return f;
+  }
+
+  void main() {
+    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+    float density = 0.0;
+    vec3 p = vWorldPosition * 0.5;
+    
+    // Raymarching simulation
+    for(int i = 0; i < 8; i++) {
+      p += viewDir * 0.1;
+      density += fbm(p + uTime * 0.2);
+    }
+    
+    float finalDensity = density * uIntensity;
+    vec3 finalColor = uColor * finalDensity * (1.0 + sin(uTime * 2.0) * 0.2);
+    
+    gl_FragColor = vec4(finalColor, finalDensity * 0.8);
+  }
+`;
+
 const noise3D = createNoise3D();
 const ColorGrade = wrapEffect(ColorGradeEffect as any) as any;
 
@@ -149,6 +209,48 @@ function AgentCloud({ agent, isActive, isTarget }: { agent: Agent; isActive: boo
     if (!isFiring) return null;
     return <points ref={pointsRef}><bufferGeometry><bufferAttribute attach="attributes-position" args={[positions, 3]} /></bufferGeometry><pointsMaterial size={0.065} color={sourceColor} transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} /></points>;
   }
+
+function NebulaCore({ state }: { state: CoreState }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  
+  const stateColors: Record<CoreState, [number, number, number]> = {
+    idle: [0.1, 0.2, 0.5],
+    listening: [0.2, 0.8, 0.6],
+    searching: [0.8, 0.8, 0.2],
+    reasoning: [0.4, 0.2, 0.8],
+    tool_use: [0.2, 0.5, 0.9],
+    error: [0.8, 0.1, 0.1],
+    complete: [0.9, 0.9, 0.9],
+  };
+
+  const color = useMemo(() => new THREE.Color(...stateColors[state]), [state]);
+
+  useFrame((state_frame) => {
+    if (!meshRef.current) return;
+    const material = meshRef.current.material as THREE.ShaderMaterial;
+    material.uniforms.uTime.value = state_frame.clock.elapsedTime;
+    material.uniforms.uColor.value.lerp(color, 0.05);
+    material.uniforms.uIntensity.value = state === "idle" ? 0.6 : 1.2;
+  });
+
+  return (
+    <mesh ref={meshRef}>
+      <sphereGeometry args={[2.5, 64, 64]} />
+      <shaderMaterial
+        transparent
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        uniforms={{
+          uTime: { value: 0 },
+          uColor: { value: new THREE.Color(0, 0, 0) },
+          uIntensity: { value: 0.6 },
+        }}
+        vertexShader={NEBULA_VERTEX_SHADER}
+        fragmentShader={NEBULA_FRAGMENT_SHADER}
+      />
+    </mesh>
+  );
+}
 
 function ConstellationGrid() {
   const lines = useMemo(() => {
@@ -455,7 +557,7 @@ function Scene({ activeIndex, targetIndex, isExecuting, isIdle }: { activeIndex:
     <Stars radius={80} depth={50} count={5000} factor={3} fade speed={isIdle ? 0.168 : 0.5} />
     <AmbientMotion isIdle={isIdle}>
       <SmokeField />
-      <SingularitySystem />
+      <NebulaCore state={coreState} />
       <ConstellationGrid />
       {AGENTS.map((agent, index) => <Float key={agent.id} speed={isIdle ? 0.49 : 1.5} floatIntensity={isIdle ? 0.5 : 0.25}><AgentCloud agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} /></Float>)}
     </AmbientMotion>
