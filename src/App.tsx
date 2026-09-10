@@ -27,6 +27,13 @@ type CopilotMessage = {
 
 type AiProvider = "ollama" | "anthropic" | "perplexity" | "perplexity_cloud";
 
+const CLOUD_MODELS = {
+  "DeepSeek Reasoner": "deepseek-reasoner",
+  "Claude 3.5 Sonnet": "claude-3-5-sonnet",
+  "GPT-4o Mini": "gpt-4o-mini",
+  "Llama 3.1 405B": "llama-3.1-405b",
+};
+
 const noise3D = createNoise3D();
 const ColorGrade = wrapEffect(ColorGradeEffect as any) as any;
 
@@ -657,13 +664,17 @@ export default function App() {
           <option value="perplexity">PERPLEXITY / WEB</option>
           <option value="perplexity_cloud">PERPLEXITY / CLOUD</option>
         </select>
-        <select 
-          aria-label="AI model" 
-          value={aiModel} 
+        <select
+          aria-label="AI model"
+          value={aiModel}
           onChange={(event) => setAiModel(event.target.value)}
           style={{ minWidth: '120px' }}
         >
-          {availableModels.length > 0 ? (
+          {aiProvider === "perplexity_cloud" ? (
+            Object.entries(CLOUD_MODELS).map(([name, id]) => (
+              <option key={id} value={id}>{name}</option>
+            ))
+          ) : availableModels.length > 0 ? (
             availableModels.map(model => <option key={model} value={model}>{model}</option>)
           ) : (
             <option value={aiModel}>{aiModel} (none found)</option>
