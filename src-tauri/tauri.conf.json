@@ -33,6 +33,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "certificateThumbprint": "${SIGNING_CERT_THUMBPRINT}",
+      "certificatePassword": "${SIGNING_CERT_PASSWORD}"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

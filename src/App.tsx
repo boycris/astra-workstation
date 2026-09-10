@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom, ChromaticAberration, Noise, SMAA, ToneMapping, Vignette, wrapEffect } from "@react-three/postprocessing";
 import { BlendFunction, ToneMappingMode } from "postprocessing";
-import { Float, OrbitControls, Stars, Text } from "@react-three/drei";
+import { Float, OrbitControls, Stars, Text, Environment, useGLTF } from "@react-three/drei";
 import { createNoise3D } from "simplex-noise";
 import * as THREE from "three";
 import { ColorGradeEffect } from "./scene/effects/ColorGradeEffect";
@@ -55,7 +55,6 @@ const NEBULA_FRAGMENT_SHADER = `
   varying vec3 vWorldPosition;
   varying vec3 vNormal;
 
-  // Simple 3D Noise function for the nebula
   float hash(float n) { return fract(sin(n) * 43758.5453123); }
   float noise(vec3 x) {
     vec3 p = floor(x);
@@ -71,7 +70,7 @@ const NEBULA_FRAGMENT_SHADER = `
   float fbm(vec3 p) {
     float f = 0.0;
     float amp = 0.5;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 6; i++) {
       f += amp * noise(p);
       p *= 2.0;
       amp *= 0.5;
@@ -82,18 +81,22 @@ const NEBULA_FRAGMENT_SHADER = `
   void main() {
     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
     float density = 0.0;
-    vec3 p = vWorldPosition * 0.5;
+    vec3 p = vWorldPosition * 0.4;
     
-    // Raymarching simulation
-    for(int i = 0; i < 8; i++) {
-      p += viewDir * 0.1;
-      density += fbm(p + uTime * 0.2);
+    for(int i = 0; i < 12; i++) {
+      p += viewDir * 0.12;
+      density += fbm(p + uTime * 0.15);
     }
+
+    float finalDensity = density * uIntensity * 0.15;
     
-    float finalDensity = density * uIntensity;
-    vec3 finalColor = uColor * finalDensity * (1.0 + sin(uTime * 2.0) * 0.2);
+    // Rim lighting effect
+    float rim = 1.0 - max(dot(vNormal, -viewDir), 0.0);
+    rim = pow(rim, 3.0) * 0.5;
     
-    gl_FragColor = vec4(finalColor, finalDensity * 0.8);
+    vec3 finalColor = uColor * finalDensity * (1.0 + sin(uTime * 1.5) * 0.15) + (uColor * rim);
+    
+    gl_FragColor = vec4(finalColor, finalDensity * 0.7);
   }
 `;
 
@@ -107,6 +110,43 @@ const AGENTS: Agent[] = [
   { id: "REPORT", name: "report build", sub: "2.11M actions / summary", pos: [-5.3, -3.7, 0.8], colorIdle: "#06b6d4", colorActive: "#ec4899" },
   { id: "INVOICE", name: "invoice run", sub: "890k actions / billing", pos: [2.4, -4.1, 2.2], colorIdle: "#818cf8", colorActive: "#e11d48" },
 ];
+
+function AgentFixture({ agent, isActive, isTarget, quality }: { agent: Agent; isActive: boolean; isTarget: boolean; quality: Quality }) {
+  // Replace 'nodes/agent_fixture.glb' with your actual exported Blender model path
+  const { scene } = useGLTF("/assets/models/agent_fixture.glb");
+  const groupRef = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    const t = state.clock.elapsedTime;
+    groupRef.current.rotation.y = Math.sin(t * 0.2) * 0.1;
+    groupRef.current.position.y = Math.sin(t * 0.5) * 0.1;
+  });
+
+  // Apply dynamic materials to the imported model
+  useEffect(() => {
+    scene.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        const material = mesh.material as THREE.MeshStandardMaterial;
+        material.color.set(isActive ? agent.colorActive : agent.colorIdle);
+        material.emissive = new THREE.Color(isActive ? agent.colorActive : "#000000");
+        material.emissiveIntensity = isActive ? 2.0 : 0.2;
+      }
+    });
+  }, [scene, isActive, agent]);
+
+  return (
+    <group ref={groupRef} position={agent.pos}>
+      <primitive object={scene} scale={0.5} />
+      {isActive && agent.dynamicLabel && (
+        <Text position={[0, 2.5, 0]} fontSize={0.28} color="#ffffff" anchorX="center" anchorY="middle">
+          {agent.dynamicLabel}
+        </Text>
+      )}
+    </group>
+  );
+}
 
 function AgentCloud({ agent, isActive, isTarget, quality }: { agent: Agent; isActive: boolean; isTarget: boolean; quality: Quality }) {
   const pointsRef = useRef<THREE.Points>(null);
@@ -555,12 +595,18 @@ function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState }: { a
     <AmbientCameraTour isIdle={isIdle} />
     <color attach="background" args={["#010206"]} />
     <ambientLight intensity={0.2} />
+    <Environment preset="city" />
     <Stars radius={80} depth={50} count={5000} factor={3} fade speed={isIdle ? 0.168 : 0.5} />
     <AmbientMotion isIdle={isIdle}>
       <SmokeField quality={quality} />
       <NebulaCore state={coreState} />
       <ConstellationGrid />
-      {AGENTS.map((agent, index) => <Float key={agent.id} speed={isIdle ? 0.49 : 1.5} floatIntensity={isIdle ? 0.5 : 0.25}><AgentCloud agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} quality={quality} /></Float>)}
+      {AGENTS.map((agent, index) => (
+        <Float key={agent.id} speed={isIdle ? 0.49 : 1.5} floatIntensity={isIdle ? 0.5 : 0.25}>
+          <AgentFixture agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} quality={quality} />
+          <AgentCloud agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} quality={quality} />
+        </Float>
+      ))}
     </AmbientMotion>
     <LaserDataStream sourceIndex={activeIndex} targetIndex={targetIndex} isFiring={isExecuting} />
     <PostProcessing isExecuting={isExecuting} quality={quality} />
