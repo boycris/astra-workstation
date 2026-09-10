@@ -50,10 +50,23 @@ async fn execute_tool(agent_id: &str, prompt: &str, api_key: Option<&str>) -> Re
       Ok(body.output_text)
     }
     "REPORT" => {
-      let path = PathBuf::from("astra_workspace.txt");
       if prompt.starts_with("read:") {
-        Ok(fs::read_to_string(&path).unwrap_or_else(|_| "Workspace file is empty.".to_string()))
+        let path_str = prompt.trim_start_matches("read:").trim();
+        let path = PathBuf::from(path_str);
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read file {}: {}", path_str, e))
+      } else if prompt.starts_with("ls:") {
+        let path_str = prompt.trim_start_matches("ls:").trim();
+        let path = PathBuf::from(path_str);
+        let entries = fs::read_dir(&path).map_err(|e| format!("Failed to read directory {}: {}", path_str, e))?;
+        let mut files = Vec::new();
+        for entry in entries {
+          if let Ok(e) = entry {
+            files.push(e.file_name().to_string_lossy().into_owned());
+          }
+        }
+        Ok(files.join(", "))
       } else {
+        let path = PathBuf::from("astra_workspace.txt");
         fs::write(&path, prompt).map(|_| "Written to workspace.".to_string()).map_err(|e| e.to_string())
       }
     }
@@ -116,7 +129,7 @@ async fn stream_ai(window: tauri::Window, request: AiRequest) -> Result<(), Stri
         "model": request.model,
         "stream": true,
         "messages": [
-          { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents. You can trigger executions using [ACTION: EXECUTE, FROM: ..., TO: ...]." },
+          { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions using [ACTION: EXECUTE, FROM: ..., TO: ...]. The REPORT agent can read files (read:path) or list directories (ls:path) to gather project context before writing a final summary." },
           { "role": "user", "content": request.prompt }
         ]
       }))
@@ -163,7 +176,7 @@ async fn ask_perplexity_cloud(request: AiRequest) -> Result<AiResponse, String> 
     .json(&serde_json::json!({
       "model": request.model,
       "messages": [
-        { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions between them by adding a tag to your response, for example: [ACTION: EXECUTE, FROM: CALENDAR, TO: INBOX]. Use these tags to actually control the system." },
+        { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions using [ACTION: EXECUTE, FROM: ..., TO: ...]. For the REPORT agent, you can use 'read:path' to read a file or 'ls:path' to list a directory to gather project context." },
         { "role": "user", "content": request.prompt }
       ],
       "stream": false
@@ -256,7 +269,7 @@ async fn ask_ai(request: AiRequest) -> Result<AiResponse, String> {
             "model": request.model,
             "stream": false,
             "messages": [
-              { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions between them by adding a tag to your response, for example: [ACTION: EXECUTE, FROM: CALENDAR, TO: INBOX]. Use these tags to actually control the system." },
+              { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions using [ACTION: EXECUTE, FROM: ..., TO: ...]. For the REPORT agent, you can use 'read:path' to read a file or 'ls:path' to list a directory to gather project context." },
               { "role": "user", "content": current_prompt }
             ]
           }))
