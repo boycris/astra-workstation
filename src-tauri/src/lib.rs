@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use futures_util::StreamExt;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +18,7 @@ struct AiResponse {
   provider: String,
   model: String,
   text: String,
+  tool_output: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -23,6 +26,47 @@ struct StreamPayload {
   text: String,
   state: String,
   is_final: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ToolResponse {
+  agent_id: String,
+  output: String,
+}
+
+async fn execute_tool(agent_id: &str, prompt: &str, api_key: Option<&str>) -> Result<String, String> {
+  match agent_id {
+    "INBOX" | "LEAD" => {
+      let key = api_key.ok_or("PERPLEXITY_API_KEY missing for web search")?;
+      let client = reqwest::Client::new();
+      let res = client
+        .post("https://api.perplexity.ai/v1/agent")
+        .header("Authorization", format!("Bearer {}", key))
+        .json(&serde_json::json!({
+          "input": prompt,
+          "preset": "low",
+          "tools": [{ "type": "web_search" }]
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+      
+      let body: PerplexityAgentResponse = res.json().await.map_err(|e| e.to_string())?;
+      Ok(body.output_text)
+    }
+    "REPORT" => {
+      let path = PathBuf::from("astra_workspace.txt");
+      if prompt.starts_with("read:") {
+        fs::read_to_string(&path).unwrap_or_else(|_| "Workspace file is empty.".to_string())
+      } else {
+        fs::write(&path, prompt).map(|_| "Written to workspace.".to_string()).map_err(|e| e.to_string())
+      }
+    }
+    "CALENDAR" | "INVOICE" => {
+      Ok(format!("Simulated data for {}: Current load 12%. All queues clear.", agent_id))
+    }
+    _ => Err(format!("No tool implemented for agent {}", agent_id)),
+  }
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,54 +227,80 @@ async fn ask_perplexity(request: AiRequest) -> Result<AiResponse, String> {
 async fn ask_ai(request: AiRequest) -> Result<AiResponse, String> {
   let client = reqwest::Client::new();
 
-  match request.provider.as_str() {
-    "anthropic" => {
-      let api_key = request.api_key.filter(|key| !key.trim().is_empty()).ok_or("Anthropic API key is required")?;
-      let response = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .json(&serde_json::json!({
-          "model": request.model,
-          "max_tokens": 512,
-          "messages": [{ "role": "user", "content": request.prompt }]
-        }))
-        .send()
-        .await
-        .map_err(|error| format!("Anthropic connection failed: {error}"))?;
+  let mut current_prompt = request.prompt.clone();
+  let mut iterations = 0;
+  const MAX_ITERATIONS: usize = 3;
 
-      let status = response.status();
-      if !status.is_success() {
-        return Err(format!("Anthropic returned {status}: {}", response.text().await.unwrap_or_default()));
-      }
-      let body = response.json::<AnthropicResponse>().await.map_err(|error| format!("Invalid Anthropic response: {error}"))?;
-      let text = body.content.into_iter().map(|content| content.text).collect::<Vec<_>>().join("\n");
-      Ok(AiResponse { provider: "anthropic".into(), model: request.model, text })
-    }
-    "ollama" => {
-      let base_url = request.base_url.unwrap_or_else(|| "http://127.0.0.1:11434".into()).trim_end_matches('/').to_string();
-      let response = client
-        .post(format!("{base_url}/api/chat"))
-        .json(&serde_json::json!({
-          "model": request.model,
-          "stream": false,
-          "messages": [
-            { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions between them by adding a tag to your response, for example: [ACTION: EXECUTE, FROM: CALENDAR, TO: INBOX]. Use these tags to actually control the system." },
-            { "role": "user", "content": request.prompt }
-          ]
-        }))
-        .send()
-        .await
-        .map_err(|error| format!("Ollama connection failed: {error}"))?;
+  loop {
+    let response_text = match request.provider.as_str() {
+      "anthropic" => {
+        let api_key = request.api_key.filter(|key| !key.trim().is_empty()).ok_or("Anthropic API key is required")?;
+        let response = client
+          .post("https://api.anthropic.com/v1/messages")
+          .header("x-api-key", api_key)
+          .header("anthropic-version", "2023-06-01")
+          .json(&serde_json::json!({
+            "model": request.model,
+            "max_tokens": 512,
+            "messages": [{ "role": "user", "content": current_prompt }]
+          }))
+          .send()
+          .await
+          .map_err(|error| format!("Anthropic connection failed: {error}"))?;
 
-      let status = response.status();
-      if !status.is_success() {
-        return Err(format!("Ollama returned {status}: {}", response.text().await.unwrap_or_default()));
+        let body = response.json::<AnthropicResponse>().await.map_err(|error| format!("Invalid Anthropic response: {error}"))?;
+        body.content.into_iter().map(|content| content.text).collect::<Vec<_>>().join("\n")
       }
-      let body = response.json::<OllamaResponse>().await.map_err(|error| format!("Invalid Ollama response: {error}"))?;
-      Ok(AiResponse { provider: "ollama".into(), model: request.model, text: body.message.content })
+      "ollama" => {
+        let base_url = request.base_url.unwrap_or_else(|| "http://127.0.0.1:11434".into()).trim_end_matches('/').to_string();
+        let response = client
+          .post(format!("{base_url}/api/chat"))
+          .json(&serde_json::json!({
+            "model": request.model,
+            "stream": false,
+            "messages": [
+              { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions between them by adding a tag to your response, for example: [ACTION: EXECUTE, FROM: CALENDAR, TO: INBOX]. Use these tags to actually control the system." },
+              { "role": "user", "content": current_prompt }
+            ]
+          }))
+          .send()
+          .await
+          .map_err(|error| format!("Ollama connection failed: {error}"))?;
+
+        let body = response.json::<OllamaResponse>().await.map_err(|error| format!("Invalid Ollama response: {error}"))?;
+        body.message.content
+      }
+      _ => return Err("Choose Anthropic or Ollama as the AI provider".into()),
+    };
+
+    // Scan for [ACTION: EXECUTE, FROM: AGENT, TO: AGENT]
+    if let Some(action_match) = response_text.find("[ACTION: EXECUTE") {
+      let tag_end = response_text[action_match..].find(']').map(|i| action_match + i + 1).unwrap_or(response_text.len());
+      let tag = &response_text[action_match..tag_end];
+      
+      // Extract FROM agent
+      let from_agent = tag.split("FROM: ").nth(1)
+        .and_then(|s| s.split(',').next())
+        .unwrap_or("UNKNOWN");
+
+      // Execute the tool
+      let api_key_ref = request.api_key.as_deref();
+      match execute_tool(from_agent, &current_prompt, api_key_ref).await {
+        Ok(tool_output) => {
+          current_prompt = format!("User: {}\nSystem: The agent {} executed and returned: {}\nAI: Please summarize this result for the user.", request.prompt, from_agent, tool_output);
+          iterations += 1;
+          if iterations >= MAX_ITERATIONS {
+            return Ok(AiResponse { provider: request.provider, model: request.model, text: format!("{} (Max iterations reached)", response_text) });
+          }
+          continue;
+        }
+        Err(e) => {
+          return Ok(AiResponse { provider: request.provider, model: request.model, text: format!("Tool error: {}", e) });
+        }
+      }
     }
-    _ => Err("Choose Anthropic or Ollama as the AI provider".into()),
+
+    return Ok(AiResponse { provider: request.provider, model: request.model, text: response_text });
   }
 }
 
