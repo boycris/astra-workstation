@@ -83,15 +83,28 @@ button, input { font: inherit; }
 .hud-faded .hud-bottom-deck { opacity: 0; }
 .hud-faded .hud-bottom-deck { pointer-events: none; }
 
-.hud-log-panel, .hud-metrics-panel, .hud-action-controls {
+.hud-log-panel, .hud-metrics-panel, .hud-action-controls, .hud-agent-status {
   border: 1px solid rgba(0, 240, 255, 0.15);
   background: rgba(4, 10, 20, 0.6);
   backdrop-filter: blur(10px);
   box-shadow: inset 0 0 15px rgba(0, 240, 255, 0.02), 0 8px 30px rgba(0, 0, 0, 0.3);
 }
 
-.hud-log-panel, .hud-metrics-panel { padding: 20px; }
+.hud-log-panel, .hud-metrics-panel, .hud-agent-status { padding: 20px; }
 .panel-title { margin-bottom: 16px; color: #7a99b5; letter-spacing: 0.2em; font-size: 9px; }
+.agent-grid { display: grid; gap: 12px; }
+.agent-status-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 8px 12px; border-left: 2px solid rgba(0, 240, 255, 0.2); background: rgba(0, 240, 255, 0.03); transition: 0.3s ease; }
+.agent-status-item.active { border-left-color: var(--pink); background: rgba(255, 42, 141, 0.08); box-shadow: 0 0 15px rgba(255, 42, 141, 0.1); }
+.agent-info { display: flex; justify-content: space-between; align-items: center; }
+.agent-id { color: #d1ecf7; font-weight: 700; font-size: 11px; letter-spacing: 0.05em; }
+.agent-state { color: #55758d; font-size: 9px; letter-spacing: 0.1em; }
+.agent-status-item.active .agent-state { color: var(--pink); }
+.agent-activity { display: grid; gap: 6px; color: #6a859e; font-size: 10px; margin-top: 4px; opacity: 0.8; }
+.activity-row { display: flex; justify-content: space-between; align-items: center; }
+.activity-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.progress-pct { color: var(--cyan); font-weight: 700; font-size: 9px; }
+.progress-track { height: 3px; background: rgba(0, 240, 255, 0.1); border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transition: width 0.2s linear; }
 .log-scroll { display: grid; gap: 10px; max-height: 100px; overflow: hidden; }
 .log-line { color: #a9d9e8; white-space: nowrap; font-size: 11px; }
 .log-line::first-letter { color: var(--cyan); }

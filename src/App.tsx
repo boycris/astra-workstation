@@ -19,6 +19,8 @@ type Agent = {
   colorIdle: string;
   colorActive: string;
   dynamicLabel?: string;
+  progress: number;
+  status: "idle" | "working" | "complete";
 };
 
 type CopilotMessage = {
@@ -109,13 +111,9 @@ const NEBULA_FRAGMENT_SHADER = `
 const noise3D = createNoise3D();
 const ColorGrade = wrapEffect(ColorGradeEffect as any) as any;
 
-const AGENTS: Agent[] = [
-  { id: "CALENDAR", name: "calendar sync", sub: "1.25M actions / syncpool", pos: [-5.8, 4.0, -1.5], colorIdle: "#00f0ff", colorActive: "#ff2a85" },
-  { id: "INBOX", name: "inbox triage", sub: "4.89M actions / parser", pos: [5.9, 4.4, 1.2], colorIdle: "#38bdf8", colorActive: "#f43f5e" },
-  { id: "LEAD", name: "lead scrape", sub: "348k actions / headless", pos: [6.4, -1.0, -2], colorIdle: "#a855f7", colorActive: "#ff0055" },
-  { id: "REPORT", name: "report build", sub: "2.11M actions / summary", pos: [-5.3, -3.7, 0.8], colorIdle: "#06b6d4", colorActive: "#ec4899" },
-  { id: "INVOICE", name: "invoice run", sub: "890k actions / billing", pos: [2.4, -4.1, 2.2], colorIdle: "#818cf8", colorActive: "#e11d48" },
-];
+// Remove the constant AGENTS from here
+// Move it into the App component
+
 
 function AgentFixture({ agent, isActive }: { agent: Agent; isActive: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -614,6 +612,13 @@ function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState, quali
 }
 
 export default function App() {
+  const [agents, setAgents] = useState<Agent[]>([
+    { id: "CALENDAR", name: "calendar sync", sub: "1.25M actions / syncpool", pos: [-5.8, 4.0, -1.5], colorIdle: "#00f0ff", colorActive: "#ff2a85", progress: 0, status: "idle" },
+    { id: "INBOX", name: "inbox triage", sub: "4.89M actions / parser", pos: [5.9, 4.4, 1.2], colorIdle: "#38bdf8", colorActive: "#f43f5e", progress: 0, status: "idle" },
+    { id: "LEAD", name: "lead scrape", sub: "348k actions / headless", pos: [6.4, -1.0, -2], colorIdle: "#a855f7", colorActive: "#ff0055", progress: 0, status: "idle" },
+    { id: "REPORT", name: "report build", sub: "2.11M actions / summary", pos: [-5.3, -3.7, 0.8], colorIdle: "#06b6d4", colorActive: "#ec4899", progress: 0, status: "idle" },
+    { id: "INVOICE", name: "invoice run", sub: "890k actions / billing", pos: [2.4, -4.1, 2.2], colorIdle: "#818cf8", colorActive: "#e11d48", progress: 0, status: "idle" },
+  ]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [targetIndex, setTargetIndex] = useState(1);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -658,9 +663,26 @@ export default function App() {
 
   function triggerExecution(from: number, to: number, taskName: string) {
     setActiveIndex(from); setTargetIndex(to); setIsExecuting(true);
-    setLogs((current) => [`${new Date().toLocaleTimeString()}  exec    ${AGENTS[from].name} -> ${AGENTS[to].name} [${taskName}]`, ...current].slice(0, 15));
+    setLogs((current) => [`${new Date().toLocaleTimeString()}  exec    ${agents[from].name} -> ${agents[to].name} [${taskName}]`, ...current].slice(0, 15));
     setThroughput((current) => current + Math.floor(Math.random() * 80 + 20));
-    window.setTimeout(() => setIsExecuting(false), 2400);
+    
+    setAgents(prev => prev.map((a, i) => i === from ? { ...a, status: "working", progress: 0 } : a));
+
+    const progressInterval = setInterval(() => {
+      setAgents(prev => prev.map((a, i) => {
+        if (i === from && a.status === "working") {
+          const nextProgress = a.progress + 10;
+          return { ...a, progress: nextProgress > 100 ? 100 : nextProgress };
+        }
+        return a;
+      }));
+    }, 200);
+
+    window.setTimeout(() => {
+      setIsExecuting(false);
+      clearInterval(progressInterval);
+      setAgents(prev => prev.map((a, i) => i === from ? { ...a, status: "idle", progress: 0 } : a));
+    }, 2400);
   }
 
   async function runCopilotCommand(command: string) {
@@ -865,11 +887,27 @@ export default function App() {
         </div>
       </header>
       <footer className="hud-bottom-deck">
-        <section className="hud-log-panel">
-          <div className="panel-title">NODE LOG STREAM</div>
-          <div className="log-scroll">
-            {logs.map((log, index) => (
-              <div key={`${log}-${index}`} className="log-line">{log}</div>
+        <section className="hud-agent-status">
+          <div className="panel-title">SWARM STATUS</div>
+          <div className="agent-grid">
+            {agents.map((agent, index) => (
+              <div key={agent.id} className={`agent-status-item ${(!isIdle && isExecuting && index === activeIndex) ? "active" : ""}`}>
+                <div className="agent-info">
+                  <span className="agent-id">{agent.id}</span>
+                  <span className="agent-state">{agent.status === "working" ? "PROCESSING" : agent.status === "complete" ? "COMPLETE" : isIdle ? "STANDBY" : "ONLINE"}</span>
+                </div>
+                <div className="agent-activity">
+                  <div className="activity-row">
+                    <span className="activity-text">{agent.dynamicLabel || agent.sub}</span>
+                    <span className="progress-pct">{agent.status === "working" ? `${agent.progress}%` : ""}</span>
+                  </div>
+                  {agent.status === "working" && (
+                    <div className="progress-track">
+                      <div className="progress-fill" style={{ width: `${agent.progress}%` }} />
+                    </div>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
         </section>
