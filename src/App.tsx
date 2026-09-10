@@ -547,7 +547,7 @@ function AmbientCameraTour({ isIdle }: { isIdle: boolean }) {
   return null;
 }
 
-function Scene({ activeIndex, targetIndex, isExecuting, isIdle }: { activeIndex: number; targetIndex: number; isExecuting: boolean; isIdle: boolean }) {
+function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState }: { activeIndex: number; targetIndex: number; isExecuting: boolean; isIdle: boolean; coreState: CoreState }) {
 
   return <Canvas camera={{ position: [0, 0, 14], fov: 45}}>
     <FitCamera />
@@ -801,7 +801,7 @@ export default function App() {
   }, []);
 
   return <main className={`hud-container${isHudVisible ? "" : " hud-faded"}`}>
-    <div className="canvas-wrapper"><Scene activeIndex={activeIndex} targetIndex={targetIndex} isExecuting={isExecuting} isIdle={isIdle} /></div>
+    <div className="canvas-wrapper"><Scene activeIndex={activeIndex} targetIndex={targetIndex} isExecuting={isExecuting} isIdle={isIdle} coreState={coreState} /></div>
     <header className="hud-top-bar"><div className="hud-brand"><span className="hud-status-bulb" /><b>grid-swarm-01</b><small>actions 12,320</small><small>profile 0 beta</small></div><div className="hud-stats"><span>pending <b>3.47</b></span><span>wait <b>0020</b></span><span>cluster <b>ONLINE</b></span></div></header>
     <footer className="hud-bottom-deck">
       <section className="hud-log-panel"><div className="panel-title">NODE LOG STREAM</div><div className="log-scroll">{logs.map((log, index) => <div key={`${log}-${index}`} className="log-line">{log}</div>)}</div></section>
