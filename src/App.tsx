@@ -28,6 +28,7 @@ type CopilotMessage = {
 
 type AiProvider = "ollama" | "anthropic" | "perplexity" | "perplexity_cloud";
 type CoreState = "idle" | "listening" | "searching" | "reasoning" | "tool_use" | "error" | "complete";
+type Quality = "low" | "medium" | "ultra";
 
 const CLOUD_MODELS = {
   "DeepSeek Reasoner": "deepseek-reasoner",
@@ -107,9 +108,9 @@ const AGENTS: Agent[] = [
   { id: "INVOICE", name: "invoice run", sub: "890k actions / billing", pos: [2.4, -4.1, 2.2], colorIdle: "#818cf8", colorActive: "#e11d48" },
 ];
 
-function AgentCloud({ agent, isActive, isTarget }: { agent: Agent; isActive: boolean; isTarget: boolean }) {
+function AgentCloud({ agent, isActive, isTarget, quality }: { agent: Agent; isActive: boolean; isTarget: boolean; quality: Quality }) {
   const pointsRef = useRef<THREE.Points>(null);
-  const count = 900;
+  const count = quality === "ultra" ? 900 : quality === "medium" ? 400 : 150;
   const [positions, basePositions] = useMemo(() => {
     const positions = new Float32Array(count * 3);
     const base = new Float32Array(count * 3);
@@ -124,7 +125,7 @@ function AgentCloud({ agent, isActive, isTarget }: { agent: Agent; isActive: boo
       base.set([x, y, z], index * 3);
     }
     return [positions, base];
-  }, []);
+  }, [count]);
   const linePositions = useMemo(() => {
     const lines = new Float32Array(180 * 6);
     for (let index = 0; index < 180; index++) {
@@ -133,7 +134,7 @@ function AgentCloud({ agent, isActive, isTarget }: { agent: Agent; isActive: boo
       lines.set([...basePositions.slice(a * 3, a * 3 + 3), ...basePositions.slice(b * 3, b * 3 + 3)], index * 6);
     }
     return lines;
-  }, [basePositions]);
+  }, [basePositions, count]);
 
   useFrame((state) => {
     if (!pointsRef.current) return;
@@ -261,9 +262,9 @@ function ConstellationGrid() {
   return <lineSegments><bufferGeometry><bufferAttribute attach="attributes-position" args={[lines, 3]} /></bufferGeometry><lineBasicMaterial color="#1a2e47" transparent opacity={0.35} /></lineSegments>;
 }
 
-function SmokeField() {
+function SmokeField({ quality }: { quality: Quality }) {
   const pointsRef = useRef<THREE.Points>(null);
-  const count = 2200;
+  const count = quality === "ultra" ? 2200 : quality === "medium" ? 1000 : 300;
   const [positions, basePositions, phases] = useMemo(() => {
     const positions = new Float32Array(count * 3);
     const basePositions = new Float32Array(count * 3);
@@ -279,7 +280,7 @@ function SmokeField() {
       phases[index] = Math.random() * Math.PI * 2;
     }
     return [positions, basePositions, phases];
-  }, []);
+  }, [count]);
 
   useFrame((state, delta) => {
     if (!pointsRef.current) return;
@@ -443,7 +444,7 @@ function SingularitySystem() {
   );
 }
 
-function PostProcessing({ isExecuting }: { isExecuting: boolean }) {
+function PostProcessing({ isExecuting, quality }: { isExecuting: boolean; quality: Quality }) {
   const bloomRef = useRef<any>(null);
   const aberrationRef = useRef<any>(null);
   const gradeRef = useRef<any>(null);
@@ -459,13 +460,13 @@ function PostProcessing({ isExecuting }: { isExecuting: boolean }) {
     }
   });
 
-  return <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
-      <Bloom ref={bloomRef} intensity={1.45} luminanceThreshold={0.18} luminanceSmoothing={0.85} mipmapBlur radius={0.72} levels={7} />
-      <ChromaticAberration ref={aberrationRef} offset={[0.001, 0.001]} radialModulation modulationOffset={0.3} />
+  return <EffectComposer multisampling={quality === "ultra" ? 0 : 0} frameBufferType={THREE.HalfFloatType}>
+      {quality !== "low" && <Bloom ref={bloomRef} intensity={1.45} luminanceThreshold={0.18} luminanceSmoothing={0.85} mipmapBlur radius={0.72} levels={7} />}
+      {quality !== "low" && <ChromaticAberration ref={aberrationRef} offset={[0.001, 0.001]} radialModulation modulationOffset={0.3} />}
       <ColorGrade ref={gradeRef} exposure={1} contrast={0.06} saturation={0.08} hue={0} />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
       <Vignette eskil={false} offset={0.25} darkness={0.9} blendFunction={BlendFunction.NORMAL} />
-      <Noise opacity={0.03} blendFunction={BlendFunction.SOFT_LIGHT} />
+      {quality !== "low" && <Noise opacity={0.03} blendFunction={BlendFunction.SOFT_LIGHT} />}
       <SMAA />
     </EffectComposer>;
 }
@@ -556,13 +557,13 @@ function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState }: { a
     <ambientLight intensity={0.2} />
     <Stars radius={80} depth={50} count={5000} factor={3} fade speed={isIdle ? 0.168 : 0.5} />
     <AmbientMotion isIdle={isIdle}>
-      <SmokeField />
+      <SmokeField quality={quality} />
       <NebulaCore state={coreState} />
       <ConstellationGrid />
-      {AGENTS.map((agent, index) => <Float key={agent.id} speed={isIdle ? 0.49 : 1.5} floatIntensity={isIdle ? 0.5 : 0.25}><AgentCloud agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} /></Float>)}
+      {AGENTS.map((agent, index) => <Float key={agent.id} speed={isIdle ? 0.49 : 1.5} floatIntensity={isIdle ? 0.5 : 0.25}><AgentCloud agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} quality={quality} /></Float>)}
     </AmbientMotion>
     <LaserDataStream sourceIndex={activeIndex} targetIndex={targetIndex} isFiring={isExecuting} />
-    <PostProcessing isExecuting={isExecuting} />
+    <PostProcessing isExecuting={isExecuting} quality={quality} />
     <OrbitControls enabled={!isIdle} enablePan={false} maxDistance={22} minDistance={6} />
   </Canvas>;
 }
@@ -573,6 +574,7 @@ export default function App() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [isHudVisible, setIsHudVisible] = useState(true);
   const [isIdle, setIsIdle] = useState(false);
+  const [quality, setQuality] = useState<Quality>("ultra");
   const [throughput, setThroughput] = useState(312);
   const [logs, setLogs] = useState(["09:41  init    grid-swarm-01 online", "09:41  grant   syncpool 10.20M actions ok", "09:42  agent   calendar_sync standing by"]);
   const [copilotOpen, setCopilotOpen] = useState(false);
@@ -834,7 +836,14 @@ export default function App() {
           )}
         </select>
       </div>
-      {aiProvider === "ollama" ? <input className="copilot-setting" aria-label="Ollama base URL" value={aiBaseUrl} onChange={(event) => setAiBaseUrl(event.target.value)} placeholder="Ollama URL" /> : <input className="copilot-setting" aria-label="Anthropic API key" type="password" value={anthropicKey} onChange={(event) => setAnthropicKey(event.target.value)} placeholder="Anthropic API key" />}
+      <div className="copilot-settings-row">
+        {aiProvider === "ollama" ? <input className="copilot-setting" aria-label="Ollama base URL" value={aiBaseUrl} onChange={(event) => setAiBaseUrl(event.target.value)} placeholder="Ollama URL" /> : <input className="copilot-setting" aria-label="Anthropic API key" type="password" value={anthropicKey} onChange={(event) => setAnthropicKey(event.target.value)} placeholder="Anthropic API key" />}
+        <select aria-label="GPU Quality" value={quality} onChange={(event) => setQuality(event.target.value as Quality)} className="copilot-setting">
+          <option value="low">LOW QUALITY</option>
+          <option value="medium">MEDIUM QUALITY</option>
+          <option value="ultra">ULTRA QUALITY</option>
+        </select>
+      </div>
       <div className="copilot-messages">{copilotMessages.map((message, index) => <div key={`${message.role}-${index}`} className={`copilot-message ${message.role}`}><span>{message.role === "ai" ? "AI" : "YOU"}</span>{message.text}</div>)}</div>
       <form className="copilot-form" onSubmit={(event) => { event.preventDefault(); runCopilotCommand(copilotInput); }}>
         <input aria-label="Ask the operations copilot" value={copilotInput} onChange={(event) => setCopilotInput(event.target.value)} placeholder="ask: status / focus inbox / summarize" />
