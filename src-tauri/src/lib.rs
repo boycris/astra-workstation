@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use futures_util::StreamExt;
 use std::fs;
 use std::path::PathBuf;
+use tauri::Emitter;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,12 +29,6 @@ struct StreamPayload {
   is_final: bool,
 }
 
-#[derive(Debug, Serialize)]
-struct ToolResponse {
-  agent_id: String,
-  output: String,
-}
-
 async fn execute_tool(agent_id: &str, prompt: &str, api_key: Option<&str>) -> Result<String, String> {
   match agent_id {
     "INBOX" | "LEAD" => {
@@ -57,7 +52,7 @@ async fn execute_tool(agent_id: &str, prompt: &str, api_key: Option<&str>) -> Re
     "REPORT" => {
       let path = PathBuf::from("astra_workspace.txt");
       if prompt.starts_with("read:") {
-        fs::read_to_string(&path).unwrap_or_else(|_| "Workspace file is empty.".to_string())
+        Ok(fs::read_to_string(&path).unwrap_or_else(|_| "Workspace file is empty.".to_string()))
       } else {
         fs::write(&path, prompt).map(|_| "Written to workspace.".to_string()).map_err(|e| e.to_string())
       }
@@ -188,7 +183,8 @@ async fn ask_perplexity_cloud(request: AiRequest) -> Result<AiResponse, String> 
   Ok(AiResponse {
     provider: "perplexity_cloud".into(),
     model: request.model,
-    text
+    text,
+    tool_output: None,
   })
 }
 
@@ -219,7 +215,8 @@ async fn ask_perplexity(request: AiRequest) -> Result<AiResponse, String> {
   Ok(AiResponse { 
     provider: "perplexity".into(), 
     model: "agent-low".into(), 
-    text: body.output_text 
+    text: body.output_text,
+    tool_output: None,
   })
 }
 
@@ -234,7 +231,7 @@ async fn ask_ai(request: AiRequest) -> Result<AiResponse, String> {
   loop {
     let response_text = match request.provider.as_str() {
       "anthropic" => {
-        let api_key = request.api_key.filter(|key| !key.trim().is_empty()).ok_or("Anthropic API key is required")?;
+        let api_key = request.api_key.as_ref().filter(|key| !key.trim().is_empty()).ok_or("Anthropic API key is required")?;
         let response = client
           .post("https://api.anthropic.com/v1/messages")
           .header("x-api-key", api_key)
@@ -252,7 +249,7 @@ async fn ask_ai(request: AiRequest) -> Result<AiResponse, String> {
         body.content.into_iter().map(|content| content.text).collect::<Vec<_>>().join("\n")
       }
       "ollama" => {
-        let base_url = request.base_url.unwrap_or_else(|| "http://127.0.0.1:11434".into()).trim_end_matches('/').to_string();
+        let base_url = request.base_url.as_deref().unwrap_or("http://127.0.0.1:11434").trim_end_matches('/').to_string();
         let response = client
           .post(format!("{base_url}/api/chat"))
           .json(&serde_json::json!({
@@ -290,17 +287,17 @@ async fn ask_ai(request: AiRequest) -> Result<AiResponse, String> {
           current_prompt = format!("User: {}\nSystem: The agent {} executed and returned: {}\nAI: Please summarize this result for the user.", request.prompt, from_agent, tool_output);
           iterations += 1;
           if iterations >= MAX_ITERATIONS {
-            return Ok(AiResponse { provider: request.provider, model: request.model, text: format!("{} (Max iterations reached)", response_text) });
+            return Ok(AiResponse { provider: request.provider, model: request.model, text: format!("{} (Max iterations reached)", response_text), tool_output: None });
           }
           continue;
         }
         Err(e) => {
-          return Ok(AiResponse { provider: request.provider, model: request.model, text: format!("Tool error: {}", e) });
+          return Ok(AiResponse { provider: request.provider, model: request.model, text: format!("Tool error: {}", e), tool_output: None });
         }
       }
     }
 
-    return Ok(AiResponse { provider: request.provider, model: request.model, text: response_text });
+    return Ok(AiResponse { provider: request.provider, model: request.model, text: response_text, tool_output: None });
   }
 }
 

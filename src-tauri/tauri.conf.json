@@ -5,8 +5,8 @@
   "identifier": "com.astra.workstation",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5177",
+    "beforeDevCommand": "npm run dev -- --port 5177",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
@@ -33,10 +33,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "windows": {
-      "certificateThumbprint": "${SIGNING_CERT_THUMBPRINT}",
-      "certificatePassword": "${SIGNING_CERT_PASSWORD}"
-    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

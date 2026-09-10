@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom, ChromaticAberration, Noise, SMAA, ToneMapping, Vignette, wrapEffect } from "@react-three/postprocessing";
 import { BlendFunction, ToneMappingMode } from "postprocessing";
-import { Float, OrbitControls, Stars, Text, Environment, useGLTF } from "@react-three/drei";
+import { Float, OrbitControls, Stars, Text, Environment } from "@react-three/drei";
 import { createNoise3D } from "simplex-noise";
 import * as THREE from "three";
 import { ColorGradeEffect } from "./scene/effects/ColorGradeEffect";
@@ -29,6 +29,12 @@ type CopilotMessage = {
 type AiProvider = "ollama" | "anthropic" | "perplexity" | "perplexity_cloud";
 type CoreState = "idle" | "listening" | "searching" | "reasoning" | "tool_use" | "error" | "complete";
 type Quality = "low" | "medium" | "ultra";
+
+type StreamPayload = {
+  text: string;
+  state?: string;
+  is_final?: boolean;
+};
 
 const CLOUD_MODELS = {
   "DeepSeek Reasoner": "deepseek-reasoner",
@@ -111,9 +117,7 @@ const AGENTS: Agent[] = [
   { id: "INVOICE", name: "invoice run", sub: "890k actions / billing", pos: [2.4, -4.1, 2.2], colorIdle: "#818cf8", colorActive: "#e11d48" },
 ];
 
-function AgentFixture({ agent, isActive, isTarget, quality }: { agent: Agent; isActive: boolean; isTarget: boolean; quality: Quality }) {
-  // Replace 'nodes/agent_fixture.glb' with your actual exported Blender model path
-  const { scene } = useGLTF("/assets/models/agent_fixture.glb");
+function AgentFixture({ agent, isActive }: { agent: Agent; isActive: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
 
   useFrame((state) => {
@@ -123,22 +127,16 @@ function AgentFixture({ agent, isActive, isTarget, quality }: { agent: Agent; is
     groupRef.current.position.y = Math.sin(t * 0.5) * 0.1;
   });
 
-  // Apply dynamic materials to the imported model
-  useEffect(() => {
-    scene.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        const material = mesh.material as THREE.MeshStandardMaterial;
-        material.color.set(isActive ? agent.colorActive : agent.colorIdle);
-        material.emissive = new THREE.Color(isActive ? agent.colorActive : "#000000");
-        material.emissiveIntensity = isActive ? 2.0 : 0.2;
-      }
-    });
-  }, [scene, isActive, agent]);
-
   return (
     <group ref={groupRef} position={agent.pos}>
-      <primitive object={scene} scale={0.5} />
+      <mesh>
+        <icosahedronGeometry args={[0.72, 1]} />
+        <meshStandardMaterial color={isActive ? agent.colorActive : agent.colorIdle} emissive={isActive ? agent.colorActive : "#000000"} emissiveIntensity={isActive ? 2 : 0.2} wireframe />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.92, 0.025, 8, 48]} />
+        <meshBasicMaterial color={isActive ? agent.colorActive : agent.colorIdle} transparent opacity={0.7} />
+      </mesh>
       {isActive && agent.dynamicLabel && (
         <Text position={[0, 2.5, 0]} fontSize={0.28} color="#ffffff" anchorX="center" anchorY="middle">
           {agent.dynamicLabel}
@@ -588,7 +586,7 @@ function AmbientCameraTour({ isIdle }: { isIdle: boolean }) {
   return null;
 }
 
-function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState }: { activeIndex: number; targetIndex: number; isExecuting: boolean; isIdle: boolean; coreState: CoreState }) {
+function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState, quality }: { activeIndex: number; targetIndex: number; isExecuting: boolean; isIdle: boolean; coreState: CoreState; quality: Quality }) {
 
   return <Canvas camera={{ position: [0, 0, 14], fov: 45}}>
     <FitCamera />
@@ -599,11 +597,12 @@ function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState }: { a
     <Stars radius={80} depth={50} count={5000} factor={3} fade speed={isIdle ? 0.168 : 0.5} />
     <AmbientMotion isIdle={isIdle}>
       <SmokeField quality={quality} />
+      <SingularitySystem />
       <NebulaCore state={coreState} />
       <ConstellationGrid />
       {AGENTS.map((agent, index) => (
         <Float key={agent.id} speed={isIdle ? 0.49 : 1.5} floatIntensity={isIdle ? 0.5 : 0.25}>
-          <AgentFixture agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} quality={quality} />
+          <AgentFixture agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} />
           <AgentCloud agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} quality={quality} />
         </Float>
       ))}
@@ -743,7 +742,7 @@ export default function App() {
                 prompt: command,
                 model: aiModel,
                 apiKey: aiProvider === "anthropic" ? anthropicKey : null,
-                baseUrl: aiProvider === "ollama" ? aiBaseUrl : null,
+                baseUrl: null,
               },
             });
           }
@@ -794,8 +793,6 @@ export default function App() {
 
     setCopilotMessages((current) => [...current, { role: "user", text: command }, { role: "ai", text: response }]);
     setAiBusy(false);
-  }
-    setCopilotInput("");
   }
 
   useEffect(() => {
@@ -849,7 +846,7 @@ export default function App() {
   }, []);
 
   return <main className={`hud-container${isHudVisible ? "" : " hud-faded"}`}>
-    <div className="canvas-wrapper"><Scene activeIndex={activeIndex} targetIndex={targetIndex} isExecuting={isExecuting} isIdle={isIdle} coreState={coreState} /></div>
+    <div className="canvas-wrapper"><Scene activeIndex={activeIndex} targetIndex={targetIndex} isExecuting={isExecuting} isIdle={isIdle} coreState={coreState} quality={quality} /></div>
     <header className="hud-top-bar"><div className="hud-brand"><span className="hud-status-bulb" /><b>grid-swarm-01</b><small>actions 12,320</small><small>profile 0 beta</small></div><div className="hud-stats"><span>pending <b>3.47</b></span><span>wait <b>0020</b></span><span>cluster <b>ONLINE</b></span></div></header>
     <footer className="hud-bottom-deck">
       <section className="hud-log-panel"><div className="panel-title">NODE LOG STREAM</div><div className="log-scroll">{logs.map((log, index) => <div key={`${log}-${index}`} className="log-line">{log}</div>)}</div></section>
