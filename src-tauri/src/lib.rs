@@ -34,18 +34,26 @@ async fn execute_tool(agent_id: &str, prompt: &str, api_key: Option<&str>) -> Re
     "INBOX" | "LEAD" => {
       let key = api_key.ok_or("PERPLEXITY_API_KEY missing for web search")?;
       let client = reqwest::Client::new();
+      
+      // Determine preset based on prompt keywords
+      let preset = if prompt.contains("deep") || prompt.contains("comprehensive") {
+        "deep"
+      } else {
+        "low"
+      };
+
       let res = client
         .post("https://api.perplexity.ai/v1/agent")
         .header("Authorization", format!("Bearer {}", key))
         .json(&serde_json::json!({
           "input": prompt,
-          "preset": "low",
+          "preset": preset,
           "tools": [{ "type": "web_search" }]
         }))
         .send()
         .await
         .map_err(|e| e.to_string())?;
-      
+
       let body: PerplexityAgentResponse = res.json().await.map_err(|e| e.to_string())?;
       Ok(body.output_text)
     }
@@ -129,7 +137,7 @@ async fn stream_ai(window: tauri::Window, request: AiRequest) -> Result<(), Stri
         "model": request.model,
         "stream": true,
         "messages": [
-          { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions using [ACTION: EXECUTE, FROM: ..., TO: ...]. The REPORT agent can read files (read:path) or list directories (ls:path) to gather project context before writing a final summary." },
+          { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents: CALENDAR, INBOX, LEAD, REPORT, and INVOICE. You can trigger executions using [ACTION: EXECUTE, FROM: ..., TO: ...]. For web research, use INBOX (general news/triage) or LEAD (deep lead/competitor research). For project analysis, use REPORT (read:path, ls:path). You can chain these, e.g., search via LEAD, then save to REPORT." },
           { "role": "user", "content": request.prompt }
         ]
       }))
