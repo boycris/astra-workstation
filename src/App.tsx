@@ -111,8 +111,13 @@ const NEBULA_FRAGMENT_SHADER = `
 const noise3D = createNoise3D();
 const ColorGrade = wrapEffect(ColorGradeEffect as any) as any;
 
-// Remove the constant AGENTS from here
-// Move it into the App component
+const AGENT_DEFS: Agent[] = [
+  { id: "CALENDAR", name: "calendar sync", sub: "1.25M actions / syncpool", pos: [-5.8, 4.0, -1.5], colorIdle: "#00f0ff", colorActive: "#ff2a85", progress: 0, status: "idle" },
+  { id: "INBOX", name: "inbox triage", sub: "4.89M actions / parser", pos: [5.9, 4.4, 1.2], colorIdle: "#38bdf8", colorActive: "#f43f5e", progress: 0, status: "idle" },
+  { id: "LEAD", name: "lead scrape", sub: "348k actions / headless", pos: [6.4, -1.0, -2], colorIdle: "#a855f7", colorActive: "#ff0055", progress: 0, status: "idle" },
+  { id: "REPORT", name: "report build", sub: "2.11M actions / summary", pos: [-5.3, -3.7, 0.8], colorIdle: "#06b6d4", colorActive: "#ec4899", progress: 0, status: "idle" },
+  { id: "INVOICE", name: "invoice run", sub: "890k actions / billing", pos: [2.4, -4.1, 2.2], colorIdle: "#818cf8", colorActive: "#e11d48", progress: 0, status: "idle" },
+];
 
 
 function AgentFixture({ agent, isActive }: { agent: Agent; isActive: boolean }) {
@@ -210,9 +215,9 @@ function AgentCloud({ agent, isActive, isTarget, quality }: { agent: Agent; isAc
   function LaserDataStream({ sourceIndex, targetIndex, isFiring }: { sourceIndex: number; targetIndex: number; isFiring: boolean }) {
     const pointsRef = useRef<THREE.Points>(null);
     const count = 350;
-    const source = useMemo(() => new THREE.Vector3(...AGENTS[sourceIndex].pos), [sourceIndex]);
-    const target = useMemo(() => new THREE.Vector3(...AGENTS[targetIndex].pos), [targetIndex]);
-    const sourceColor = AGENTS[sourceIndex].colorActive;
+    const source = useMemo(() => new THREE.Vector3(...AGENT_DEFS[sourceIndex].pos), [sourceIndex]);
+    const target = useMemo(() => new THREE.Vector3(...AGENT_DEFS[targetIndex].pos), [targetIndex]);
+    const sourceColor = AGENT_DEFS[sourceIndex].colorActive;
 
     const curve = useMemo(() => {
       const midpoint = source.clone().lerp(target, 0.5);
@@ -292,7 +297,7 @@ function NebulaCore({ state }: { state: CoreState }) {
 function ConstellationGrid() {
   const lines = useMemo(() => {
     const coordinates: number[] = [];
-    for (let first = 0; first < AGENTS.length; first++) for (let second = first + 1; second < AGENTS.length; second++) coordinates.push(...AGENTS[first].pos, ...AGENTS[second].pos);
+    for (let first = 0; first < AGENT_DEFS.length; first++) for (let second = first + 1; second < AGENT_DEFS.length; second++) coordinates.push(...AGENT_DEFS[first].pos, ...AGENT_DEFS[second].pos);
     return new Float32Array(coordinates);
   }, []);
   return <lineSegments><bufferGeometry><bufferAttribute attach="attributes-position" args={[lines, 3]} /></bufferGeometry><lineBasicMaterial color="#1a2e47" transparent opacity={0.35} /></lineSegments>;
@@ -598,7 +603,7 @@ function Scene({ activeIndex, targetIndex, isExecuting, isIdle, coreState, quali
       <SingularitySystem />
       <NebulaCore state={coreState} />
       <ConstellationGrid />
-      {AGENTS.map((agent, index) => (
+      {AGENT_DEFS.map((agent, index) => (
         <Float key={agent.id} speed={isIdle ? 0.49 : 1.5} floatIntensity={isIdle ? 0.5 : 0.25}>
           <AgentFixture agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} />
           <AgentCloud agent={agent} isActive={!isIdle && isExecuting && index === activeIndex} isTarget={!isIdle && isExecuting && index === targetIndex} quality={quality} />
@@ -694,7 +699,7 @@ export default function App() {
     setCoreState("listening");
 
     let response = "I can check status, focus an agent, run a workflow, or ask the connected AI provider.";
-    const requestedAgent = AGENTS.find((agent) => normalized.includes(agent.id.toLowerCase()) || normalized.includes(agent.name.split(" ")[0]));
+    const requestedAgent = AGENT_DEFS.find((agent) => normalized.includes(agent.id.toLowerCase()) || normalized.includes(agent.name.split(" ")[0]));
 
     if (normalized.includes("status") || normalized.includes("health")) {
       setCoreState("searching");
@@ -702,14 +707,14 @@ export default function App() {
       setTimeout(() => { setCoreState("idle"); setAiBusy(false); }, 2000);
     } else if (normalized.includes("focus") && requestedAgent) {
       setCoreState("reasoning");
-      setTargetIndex(AGENTS.indexOf(requestedAgent));
+      setTargetIndex(AGENT_DEFS.indexOf(requestedAgent));
       response = `Tracking ${requestedAgent.name}. The camera target is queued for the next execution.`;
       setTimeout(() => { setCoreState("idle"); setAiBusy(false); }, 1500);
     } else if (normalized.includes("run") || normalized.includes("start") || normalized.includes("execute")) {
       setCoreState("tool_use");
-      const target = requestedAgent ?? AGENTS[(activeIndex + 1) % AGENTS.length];
-      triggerExecution(activeIndex, AGENTS.indexOf(target), requestedAgent ? `${target.id.toLowerCase()}_analysis` : "synthesis_report");
-      response = `Execution started: ${AGENTS[activeIndex].name} -> ${target.name}.`;
+      const target = requestedAgent ?? AGENT_DEFS[(activeIndex + 1) % AGENT_DEFS.length];
+      triggerExecution(activeIndex, AGENT_DEFS.indexOf(target), requestedAgent ? `${target.id.toLowerCase()}_analysis` : "synthesis_report");
+      response = `Execution started: ${AGENT_DEFS[activeIndex].name} -> ${target.name}.`;
       setTimeout(() => { setCoreState("idle"); setAiBusy(false); }, 2400);
     } else if (normalized.includes("tour") || normalized.includes("ambient")) {
       response = "Ambient tour is automatic after inactivity. Move the pointer to return to the live controls.";
@@ -775,24 +780,22 @@ export default function App() {
           for (const match of actions) {
             const [_, type, from, to, target, value] = match;
             if (type === "EXECUTE") {
-              const fromIdx = AGENTS.findIndex(a => a.id === from?.toUpperCase());
-              const toIdx = AGENTS.findIndex(a => a.id === to?.toUpperCase());
+              const fromIdx = AGENT_DEFS.findIndex(a => a.id === from?.toUpperCase());
+              const toIdx = AGENT_DEFS.findIndex(a => a.id === to?.toUpperCase());
               if (fromIdx !== -1 && toIdx !== -1) {
-                AGENTS[fromIdx].dynamicLabel = "Sourcing...";
-                AGENTS[toIdx].dynamicLabel = "Processing...";
+                setAgents(prev => prev.map((a, i) => i === fromIdx ? { ...a, dynamicLabel: "Sourcing..." } : i === toIdx ? { ...a, dynamicLabel: "Processing..." } : a));
                 triggerExecution(fromIdx, toIdx, "ai_orchestrated_stream");
                 window.setTimeout(() => {
-                  AGENTS[fromIdx].dynamicLabel = undefined;
-                  AGENTS[toIdx].dynamicLabel = undefined;
+                  setAgents(prev => prev.map((a, i) => i === fromIdx ? { ...a, dynamicLabel: undefined } : i === toIdx ? { ...a, dynamicLabel: undefined } : a));
                 }, 2400);
               }
             } else if (type === "FOCUS") {
-              const targetIdx = AGENTS.findIndex(a => a.id === target?.toUpperCase());
+              const targetIdx = AGENT_DEFS.findIndex(a => a.id === target?.toUpperCase());
               if (targetIdx !== -1) {
-                AGENTS[targetIdx].dynamicLabel = "Focused";
+                setAgents(prev => prev.map((a, i) => i === targetIdx ? { ...a, dynamicLabel: "Focused" } : a));
                 setTargetIndex(targetIdx);
                 window.setTimeout(() => {
-                  AGENTS[targetIdx].dynamicLabel = undefined;
+                  setAgents(prev => prev.map((a, i) => i === targetIdx ? { ...a, dynamicLabel: undefined } : a));
                 }, 3000);
               }
             } else if (type === "CLEAR_LOGS") {
@@ -838,9 +841,9 @@ export default function App() {
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      const from = Math.floor(Math.random() * AGENTS.length);
-      let to = Math.floor(Math.random() * AGENTS.length);
-      while (to === from) to = Math.floor(Math.random() * AGENTS.length);
+      const from = Math.floor(Math.random() * AGENT_DEFS.length);
+      let to = Math.floor(Math.random() * AGENT_DEFS.length);
+      while (to === from) to = Math.floor(Math.random() * AGENT_DEFS.length);
       triggerExecution(from, to, "token_stream");
     }, 3800);
     return () => window.clearInterval(interval);
