@@ -845,53 +845,105 @@ export default function App() {
     };
   }, []);
 
-  return <main className={`hud-container${isHudVisible ? "" : " hud-faded"}`}>
-    <div className="canvas-wrapper"><Scene activeIndex={activeIndex} targetIndex={targetIndex} isExecuting={isExecuting} isIdle={isIdle} coreState={coreState} quality={quality} /></div>
-    <header className="hud-top-bar"><div className="hud-brand"><span className="hud-status-bulb" /><b>grid-swarm-01</b><small>actions 12,320</small><small>profile 0 beta</small></div><div className="hud-stats"><span>pending <b>3.47</b></span><span>wait <b>0020</b></span><span>cluster <b>ONLINE</b></span></div></header>
-    <footer className="hud-bottom-deck">
-      <section className="hud-log-panel"><div className="panel-title">NODE LOG STREAM</div><div className="log-scroll">{logs.map((log, index) => <div key={`${log}-${index}`} className="log-line">{log}</div>)}</div></section>
-      <section className="hud-metrics-panel"><div className="panel-title">SYSTEM THROUGHPUT</div><div className="metric-number">{throughput} <small>ops/sec</small></div><div className="metric-bar"><div className="metric-fill" style={{ width: `${Math.min(throughput / 8, 100)}%` }} /></div><div className="metric-row"><span>PEAK 96%</span><span>DRAIN 0.02ms</span></div></section>
-      <section className="hud-action-controls"><button onClick={() => triggerExecution(0, 1, "inbox_triage")}>TRIGGER INBOX TRIAGE</button><button onClick={() => triggerExecution(2, 3, "report_build")}>BUILD SYNTHESIS REPORT</button><button className="copilot-toggle" onClick={() => setCopilotOpen((open) => !open)}>AI COPILOT {copilotOpen ? "-" : "+"}</button></section>
-    </footer>
-    {copilotOpen && <section className="copilot-panel">
-      <div className="panel-title">AI OPERATIONS COPILOT</div>
-      <div className="copilot-provider-row">
-        <select aria-label="AI provider" value={aiProvider} onChange={(event) => setAiProvider(event.target.value as AiProvider)}>
-          <option value="ollama">OLLAMA / LOCAL</option>
-          <option value="anthropic">ANTHROPIC / CLOUD</option>
-          <option value="perplexity">PERPLEXITY / WEB</option>
-          <option value="perplexity_cloud">PERPLEXITY / CLOUD</option>
-        </select>
-        <select
-          aria-label="AI model"
-          value={aiModel}
-          onChange={(event) => setAiModel(event.target.value)}
-          style={{ minWidth: '120px' }}
-        >
-          {aiProvider === "perplexity_cloud" ? (
-            Object.entries(CLOUD_MODELS).map(([name, id]) => (
-              <option key={id} value={id}>{name}</option>
-            ))
-          ) : availableModels.length > 0 ? (
-            availableModels.map(model => <option key={model} value={model}>{model}</option>)
-          ) : (
-            <option value={aiModel}>{aiModel} (none found)</option>
-          )}
-        </select>
+  return (
+    <main className={`hud-container${isHudVisible ? "" : " hud-faded"}`}>
+      <div className="canvas-wrapper">
+        <Scene activeIndex={activeIndex} targetIndex={targetIndex} isExecuting={isExecuting} isIdle={isIdle} coreState={coreState} quality={quality} />
       </div>
-      <div className="copilot-settings-row">
-        {aiProvider === "ollama" ? <input className="copilot-setting" aria-label="Ollama base URL" value={aiBaseUrl} onChange={(event) => setAiBaseUrl(event.target.value)} placeholder="Ollama URL" /> : <input className="copilot-setting" aria-label="Anthropic API key" type="password" value={anthropicKey} onChange={(event) => setAnthropicKey(event.target.value)} placeholder="Anthropic API key" />}
-        <select aria-label="GPU Quality" value={quality} onChange={(event) => setQuality(event.target.value as Quality)} className="copilot-setting">
-          <option value="low">LOW QUALITY</option>
-          <option value="medium">MEDIUM QUALITY</option>
-          <option value="ultra">ULTRA QUALITY</option>
-        </select>
-      </div>
-      <div className="copilot-messages">{copilotMessages.map((message, index) => <div key={`${message.role}-${index}`} className={`copilot-message ${message.role}`}><span>{message.role === "ai" ? "AI" : "YOU"}</span>{message.text}</div>)}</div>
-      <form className="copilot-form" onSubmit={(event) => { event.preventDefault(); runCopilotCommand(copilotInput); }}>
-        <input aria-label="Ask the operations copilot" value={copilotInput} onChange={(event) => setCopilotInput(event.target.value)} placeholder="ask: status / focus inbox / summarize" />
-        <button type="submit" aria-label="Send copilot command" disabled={aiBusy}>{aiBusy ? "..." : "SEND"}</button>
-      </form>
-    </section>}
-  </main>;
+      <header className="hud-top-bar">
+        <div className="hud-brand">
+          <span className="hud-status-bulb" />
+          <b>grid-swarm-01</b>
+          <small>actions 12,320</small>
+          <small>profile 0 beta</small>
+        </div>
+        <div className="hud-stats">
+          <span>pending <b>3.47</b></span>
+          <span>wait <b>0020</b></span>
+          <span>cluster <b>ONLINE</b></span>
+        </div>
+      </header>
+      <footer className="hud-bottom-deck">
+        <section className="hud-log-panel">
+          <div className="panel-title">NODE LOG STREAM</div>
+          <div className="log-scroll">
+            {logs.map((log, index) => (
+              <div key={`${log}-${index}`} className="log-line">{log}</div>
+            ))}
+          </div>
+        </section>
+        <section className="hud-metrics-panel">
+          <div className="panel-title">SYSTEM THROUGHPUT</div>
+          <div className="metric-number">{throughput} <small>ops/sec</small></div>
+          <div className="metric-bar">
+            <div className="metric-fill" style={{ width: `${Math.min(throughput / 8, 100)}%` }} />
+          </div>
+          <div className="metric-row">
+            <span>PEAK 96%</span>
+            <span>DRAIN 0.02ms</span>
+          </div>
+        </section>
+        <section className="hud-action-controls">
+          <button onClick={() => triggerExecution(0, 1, "inbox_triage")}>TRIGGER INBOX TRIAGE</button>
+          <button onClick={() => triggerExecution(2, 3, "report_build")}>BUILD SYNTHESIS REPORT</button>
+          <button className="copilot-toggle" onClick={() => setCopilotOpen((open) => !open)}>
+            AI COPILOT {copilotOpen ? "-" : "+"}
+          </button>
+        </section>
+      </footer>
+      {copilotOpen && (
+        <section className="copilot-panel">
+          <div className="panel-title">AI OPERATIONS COPILOT</div>
+          <div className="copilot-provider-row">
+            <select aria-label="AI provider" value={aiProvider} onChange={(event) => setAiProvider(event.target.value as AiProvider)}>
+              <option value="ollama">OLLAMA / LOCAL</option>
+              <option value="anthropic">ANTHROPIC / CLOUD</option>
+              <option value="perplexity">PERPLEXITY / WEB</option>
+              <option value="perplexity_cloud">PERPLEXITY / CLOUD</option>
+            </select>
+            <select
+              aria-label="AI model"
+              value={aiModel}
+              onChange={(event) => setAiModel(event.target.value)}
+              style={{ minWidth: '120px' }}
+            >
+              {aiProvider === "perplexity_cloud" ? (
+                Object.entries(CLOUD_MODELS).map(([name, id]) => (
+                  <option key={id} value={id}>{name}</option>
+                ))
+              ) : availableModels.length > 0 ? (
+                availableModels.map(model => <option key={model} value={model}>{model}</option>)
+              ) : (
+                <option value={aiModel}>{aiModel} (none found)</option>
+              )}
+            </select>
+          </div>
+          <div className="copilot-settings-row">
+            {aiProvider === "ollama" ? (
+              <input className="copilot-setting" aria-label="Ollama base URL" value={aiBaseUrl} onChange={(event) => setAiBaseUrl(event.target.value)} placeholder="Ollama URL" />
+            ) : (
+              <input className="copilot-setting" aria-label="Anthropic API key" type="password" value={anthropicKey} onChange={(event) => setAnthropicKey(event.target.value)} placeholder="Anthropic API key" />
+            )}
+            <select aria-label="GPU Quality" value={quality} onChange={(event) => setQuality(event.target.value as Quality)} className="copilot-setting">
+              <option value="low">LOW QUALITY</option>
+              <option value="medium">MEDIUM QUALITY</option>
+              <option value="ultra">ULTRA QUALITY</option>
+            </select>
+          </div>
+          <div className="copilot-messages">
+            {copilotMessages.map((message, index) => (
+              <div key={`${message.role}-${index}`} className={`copilot-message ${message.role}`}>
+                <span>{message.role === "ai" ? "AI" : "YOU"}</span>
+                {message.text}
+              </div>
+            ))}
+          </div>
+          <form className="copilot-form" onSubmit={(event) => { event.preventDefault(); runCopilotCommand(copilotInput); }}>
+            <input aria-label="Ask the operations copilot" value={copilotInput} onChange={(event) => setCopilotInput(event.target.value)} placeholder="ask: status / focus inbox / summarize" />
+            <button type="submit" aria-label="Send copilot command" disabled={aiBusy}>{aiBusy ? "..." : "SEND"}</button>
+          </form>
+        </section>
+      )}
+    </main>
+  );
 }
