@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom, ChromaticAberration, Noise, SMAA, ToneMapping, Vignette, wrapEffect } from "@react-three/postprocessing";
 import { BlendFunction, ToneMappingMode } from "postprocessing";
@@ -26,6 +27,7 @@ type CopilotMessage = {
 };
 
 type AiProvider = "ollama" | "anthropic" | "perplexity" | "perplexity_cloud";
+type CoreState = "idle" | "listening" | "searching" | "reasoning" | "tool_use" | "error" | "complete";
 
 const CLOUD_MODELS = {
   "DeepSeek Reasoner": "deepseek-reasoner",
@@ -479,9 +481,31 @@ export default function App() {
   const [aiBaseUrl, setAiBaseUrl] = useState("http://127.0.0.1:11434");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [coreState, setCoreState] = useState<CoreState>("idle");
   const [copilotMessages, setCopilotMessages] = useState<CopilotMessage[]>([
     { role: "ai", text: "Copilot online. Ask for status, focus an agent, or run a workflow." },
   ]);
+
+  useEffect(() => {
+    const unlisten = listen<StreamPayload>("ai-chunk", (event) => {
+      const { text, state, is_final } = event.payload;
+      
+      setCopilotMessages((current) => {
+        const last = current[current.length - 1];
+        if (last && last.role === "ai") {
+          return [...current.slice(0, -1), { role: "ai", text: last.text + text }];
+        }
+        return [...current, { role: "ai", text: text }];
+      });
+      
+      if (state) setCoreState(state as CoreState);
+      if (is_final) {
+        setAiBusy(false);
+        setCoreState("complete");
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
   function triggerExecution(from: number, to: number, taskName: string) {
     setActiveIndex(from); setTargetIndex(to); setIsExecuting(true);
@@ -494,106 +518,133 @@ export default function App() {
     const normalized = command.trim().toLowerCase();
     if (!normalized) return;
 
+    setAiBusy(true);
+    setCoreState("listening");
+
     let response = "I can check status, focus an agent, run a workflow, or ask the connected AI provider.";
     const requestedAgent = AGENTS.find((agent) => normalized.includes(agent.id.toLowerCase()) || normalized.includes(agent.name.split(" ")[0]));
 
     if (normalized.includes("status") || normalized.includes("health")) {
+      setCoreState("searching");
       response = `System is online at ${throughput} ops/sec. ${isExecuting ? "Execution stream is active." : "All agents are standing by."}`;
+      setTimeout(() => { setCoreState("idle"); setAiBusy(false); }, 2000);
     } else if (normalized.includes("focus") && requestedAgent) {
+      setCoreState("reasoning");
       setTargetIndex(AGENTS.indexOf(requestedAgent));
       response = `Tracking ${requestedAgent.name}. The camera target is queued for the next execution.`;
+      setTimeout(() => { setCoreState("idle"); setAiBusy(false); }, 1500);
     } else if (normalized.includes("run") || normalized.includes("start") || normalized.includes("execute")) {
+      setCoreState("tool_use");
       const target = requestedAgent ?? AGENTS[(activeIndex + 1) % AGENTS.length];
       triggerExecution(activeIndex, AGENTS.indexOf(target), requestedAgent ? `${target.id.toLowerCase()}_analysis` : "synthesis_report");
       response = `Execution started: ${AGENTS[activeIndex].name} -> ${target.name}.`;
+      setTimeout(() => { setCoreState("idle"); setAiBusy(false); }, 2400);
     } else if (normalized.includes("tour") || normalized.includes("ambient")) {
       response = "Ambient tour is automatic after inactivity. Move the pointer to return to the live controls.";
+      setAiBusy(false);
     } else {
-      setCopilotMessages((current) => [...current.slice(-3), { role: "user", text: command }, { role: "ai", text: `${aiProvider === "ollama" ? "Ollama" : "Anthropic"} is thinking...` }]);
       setCopilotInput("");
-      setAiBusy(true);
-      try {
-        let result;
-        if (aiProvider === "perplexity") {
-          result = await invoke<{ provider: string; model: string; text: string }>("ask_perplexity", {
+      if (aiProvider === "ollama") {
+        setCoreState("reasoning");
+        try {
+          await invoke("stream_ai", {
             request: {
               provider: aiProvider,
               prompt: command,
               model: aiModel,
               apiKey: null,
-              baseUrl: null,
+              baseUrl: aiBaseUrl,
             },
           });
-        } else if (aiProvider === "perplexity_cloud") {
-          result = await invoke<{ provider: string; model: string; text: string }>("ask_perplexity_cloud", {
-            request: {
-              provider: aiProvider,
-              prompt: command,
-              model: aiModel,
-              apiKey: null,
-              baseUrl: null,
-            },
-          });
-        } else {
-          result = await invoke<{ provider: string; model: string; text: string }>("ask_ai", {
-            request: {
-              provider: aiProvider,
-              prompt: command,
-              model: aiModel,
-              apiKey: aiProvider === "anthropic" ? anthropicKey : null,
-              baseUrl: aiProvider === "ollama" ? aiBaseUrl : null,
-            },
-          });
+        } catch (e) {
+          setCoreState("error");
+          setCopilotMessages((current) => [...current, { role: "ai", text: `Error: ${e}` }]);
+          setAiBusy(false);
         }
-
-        const aiText = result.text;
-        
-        // Parse actions
-        const actions = aiText.matchAll(/\[ACTION: (\w+), (?:FROM: (\w+), TO: (\w+)|TARGET: (\w+)|VALUE: (\d+))\]/g);
-        for (const match of actions) {
-          const [_, type, from, to, target, value] = match;
-          
-          if (type === "EXECUTE") {
-            const fromIdx = AGENTS.findIndex(a => a.id === from?.toUpperCase());
-            const toIdx = AGENTS.findIndex(a => a.id === to?.toUpperCase());
-            if (fromIdx !== -1 && toIdx !== -1) {
-              // Set dynamic labels for the agents involved in the execution
-              AGENTS[fromIdx].dynamicLabel = "Sourcing...";
-              AGENTS[toIdx].dynamicLabel = "Processing...";
-              triggerExecution(fromIdx, toIdx, "ai_orchestrated_stream");
-              
-              // Clear labels after animation
-              window.setTimeout(() => {
-                AGENTS[fromIdx].dynamicLabel = undefined;
-                AGENTS[toIdx].dynamicLabel = undefined;
-              }, 2400);
-            }
-          } else if (type === "FOCUS") {
-            const targetIdx = AGENTS.findIndex(a => a.id === target?.toUpperCase());
-            if (targetIdx !== -1) {
-              AGENTS[targetIdx].dynamicLabel = "Focused";
-              setTargetIndex(targetIdx);
-              window.setTimeout(() => {
-                AGENTS[targetIdx].dynamicLabel = undefined;
-              }, 3000);
-            }
-          } else if (type === "CLEAR_LOGS") {
-            setLogs([]);
-          } else if (type === "SET_THROUGHPUT") {
-            if (value) setThroughput(parseInt(value, 10));
+        return;
+      } else {
+        setCoreState("reasoning");
+        try {
+          let result;
+          if (aiProvider === "perplexity") {
+            result = await invoke<{ provider: string; model: string; text: string }>("ask_perplexity", {
+              request: {
+                provider: aiProvider,
+                prompt: command,
+                model: aiModel,
+                apiKey: null,
+                baseUrl: null,
+              },
+            });
+          } else if (aiProvider === "perplexity_cloud") {
+            result = await invoke<{ provider: string; model: string; text: string }>("ask_perplexity_cloud", {
+              request: {
+                provider: aiProvider,
+                prompt: command,
+                model: aiModel,
+                apiKey: null,
+                baseUrl: null,
+              },
+            });
+          } else {
+            result = await invoke<{ provider: string; model: string; text: string }>("ask_ai", {
+              request: {
+                provider: aiProvider,
+                prompt: command,
+                model: aiModel,
+                apiKey: aiProvider === "anthropic" ? anthropicKey : null,
+                baseUrl: aiProvider === "ollama" ? aiBaseUrl : null,
+              },
+            });
           }
-        }
 
-        setCopilotMessages((current) => [...current.slice(0, -1), { role: "ai", text: `[${result.provider} / ${result.model}] ${aiText}` }]);
-      } catch (error) {
-        setCopilotMessages((current) => [...current.slice(0, -1), { role: "ai", text: String(error) }]);
-      } finally {
-        setAiBusy(false);
+          const aiText = result.text;
+          const actions = aiText.matchAll(/\[ACTION: (\w+), (?:FROM: (\w+), TO: (\w+)|TARGET: (\w+)|VALUE: (\d+))\]/g);
+          for (const match of actions) {
+            const [_, type, from, to, target, value] = match;
+            if (type === "EXECUTE") {
+              const fromIdx = AGENTS.findIndex(a => a.id === from?.toUpperCase());
+              const toIdx = AGENTS.findIndex(a => a.id === to?.toUpperCase());
+              if (fromIdx !== -1 && toIdx !== -1) {
+                AGENTS[fromIdx].dynamicLabel = "Sourcing...";
+                AGENTS[toIdx].dynamicLabel = "Processing...";
+                triggerExecution(fromIdx, toIdx, "ai_orchestrated_stream");
+                window.setTimeout(() => {
+                  AGENTS[fromIdx].dynamicLabel = undefined;
+                  AGENTS[toIdx].dynamicLabel = undefined;
+                }, 2400);
+              }
+            } else if (type === "FOCUS") {
+              const targetIdx = AGENTS.findIndex(a => a.id === target?.toUpperCase());
+              if (targetIdx !== -1) {
+                AGENTS[targetIdx].dynamicLabel = "Focused";
+                setTargetIndex(targetIdx);
+                window.setTimeout(() => {
+                  AGENTS[targetIdx].dynamicLabel = undefined;
+                }, 3000);
+              }
+            } else if (type === "CLEAR_LOGS") {
+              setLogs([]);
+            } else if (type === "SET_THROUGHPUT") {
+              if (value) setThroughput(parseInt(value, 10));
+            }
+          }
+
+          setCopilotMessages((current) => [...current, { role: "ai", text: `[${result.provider} / ${result.model}] ${aiText}` }]);
+          setCoreState("complete");
+        } catch (error) {
+          setCoreState("error");
+          setCopilotMessages((current) => [...current, { role: "ai", text: String(error) }]);
+        } finally {
+          setAiBusy(false);
+        }
+        return;
       }
-      return;
     }
 
-    setCopilotMessages((current) => [...current.slice(-3), { role: "user", text: command }, { role: "ai", text: response }]);
+    setCopilotMessages((current) => [...current, { role: "user", text: command }, { role: "ai", text: response }]);
+    setAiBusy(false);
+  }
     setCopilotInput("");
   }
 

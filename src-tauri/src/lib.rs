@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use futures_util::StreamExt;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +16,13 @@ struct AiResponse {
   provider: String,
   model: String,
   text: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct StreamPayload {
+  text: String,
+  state: String,
+  is_final: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +63,54 @@ struct PerplexityMessage {
 #[derive(Debug, Deserialize)]
 struct PerplexityAgentResponse {
   output_text: String,
+}
+
+#[tauri::command]
+async fn stream_ai(window: tauri::Window, request: AiRequest) -> Result<(), String> {
+  let client = reqwest::Client::new();
+  
+  if request.provider == "ollama" {
+    let base_url = request.base_url.unwrap_or_else(|| "http://127.0.0.1:11434".into()).trim_end_matches('/').to_string();
+    let response = client
+      .post(format!("{base_url}/api/chat"))
+      .json(&serde_json::json!({
+        "model": request.model,
+        "stream": true,
+        "messages": [
+          { "role": "system", "content": "You are the Astra Workstation Copilot. You manage a swarm of agents. You can trigger executions using [ACTION: EXECUTE, FROM: ..., TO: ...]." },
+          { "role": "user", "content": request.prompt }
+        ]
+      }))
+      .send()
+      .await
+      .map_err(|e| e.to_string())?;
+
+    let mut stream = response.bytes_stream();
+
+    while let Some(item) = stream.next().await {
+      let chunk = item.map_err(|e| e.to_string())?;
+      if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&chunk) {
+        if let Some(content) = json["message"]["content"].as_str() {
+          window.emit("ai-chunk", StreamPayload {
+            text: content.to_string(),
+            state: "reasoning".into(),
+            is_final: false,
+          }).map_err(|e| e.to_string())?;
+        }
+        if json["done"] == true {
+          window.emit("ai-chunk", StreamPayload {
+            text: "".into(),
+            state: "complete".into(),
+            is_final: true,
+          }).map_err(|e| e.to_string())?;
+        }
+      }
+    }
+  } else {
+    return Err("Streaming only supported for Ollama currently. Cloud providers are being integrated.".into());
+  }
+
+  Ok(())
 }
 
 #[tauri::command]
@@ -181,7 +237,7 @@ async fn ask_ai(request: AiRequest) -> Result<AiResponse, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![ask_ai, ask_perplexity, ask_perplexity_cloud])
+    .invoke_handler(tauri::generate_handler![ask_ai, ask_perplexity, ask_perplexity_cloud, stream_ai])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
