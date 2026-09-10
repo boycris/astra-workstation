@@ -667,6 +667,7 @@ export default function App() {
     const normalized = command.trim().toLowerCase();
     if (!normalized) return;
 
+    setCopilotMessages((current) => [...current, { role: "user", text: command }]);
     setAiBusy(true);
     setCoreState("listening");
 
@@ -791,7 +792,7 @@ export default function App() {
       }
     }
 
-    setCopilotMessages((current) => [...current, { role: "user", text: command }, { role: "ai", text: response }]);
+    setCopilotMessages((current) => [...current, { role: "ai", text: response }]);
     setAiBusy(false);
   }
 
